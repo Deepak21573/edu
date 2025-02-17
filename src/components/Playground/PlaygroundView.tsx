@@ -1,10 +1,47 @@
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { SearchBar } from "../shared/SearchBar";
 import { Loading } from "../shared/Loading";
 import { useApi } from "../../hooks/useApi";
 import { Trophy, Timer, Target, Award, Pause, Play, CheckCircle, XCircle, Lightbulb } from "lucide-react";
 import { Question, UserContext } from "../../types";
+
+// Rate limits
+const RATE_LIMITS = {
+  MINUTE: 15, // 15 requests per minute
+  HOUR: 250, // 250 requests per hour
+  DAY: 500, // 500 requests per day
+};
+
+const requestLog: number[] = [];
+
+const checkRateLimits = (): string | null => {
+  const now = Date.now();
+  const minuteAgo = now - 60 * 1000;
+  const hourAgo = now - 60 * 60 * 1000;
+  const dayAgo = now - 24 * 60 * 60 * 1000;
+
+  // Filter out outdated requests
+  const requestsLastMinute = requestLog.filter(timestamp => timestamp > minuteAgo).length;
+  const requestsLastHour = requestLog.filter(timestamp => timestamp > hourAgo).length;
+  const requestsLastDay = requestLog.filter(timestamp => timestamp > dayAgo).length;
+
+  if (requestsLastMinute >= RATE_LIMITS.MINUTE) {
+    return "Rate limit exceeded: Too many requests per minute.";
+  }
+
+  if (requestsLastHour >= RATE_LIMITS.HOUR) {
+    return "Rate limit exceeded: Too many requests per hour.";
+  }
+
+  if (requestsLastDay >= RATE_LIMITS.DAY) {
+    return "Rate limit exceeded: Too many requests per day.";
+  }
+
+  // Log the current request
+  requestLog.push(now);
+  return null;
+};
 
 interface PlaygroundViewProps {
   initialQuery?: string;
@@ -67,7 +104,7 @@ export const PlaygroundView: React.FC<PlaygroundViewProps> = ({
   // Countdown logic
   useEffect(() => {
     let interval: NodeJS.Timeout | null = null;
-    if (nextQuestionCountdown !== null && nextQuestionCountdown > 0) {
+    if (!isPaused && nextQuestionCountdown !== null && nextQuestionCountdown > 0) {
       interval = setInterval(() => {
         setNextQuestionCountdown((prev) => (prev !== null ? prev - 0.1 : null));
       }, 100);
@@ -78,9 +115,15 @@ export const PlaygroundView: React.FC<PlaygroundViewProps> = ({
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [nextQuestionCountdown]);
+  }, [isPaused, nextQuestionCountdown]);
 
   const fetchNewQuestion = async () => {
+    const rateLimitError = checkRateLimits();
+    if (rateLimitError) {
+      onError(rateLimitError);
+      return;
+    }
+
     if (!query || sessionStats.isSessionComplete) return;
 
     try {
@@ -93,6 +136,7 @@ export const PlaygroundView: React.FC<PlaygroundViewProps> = ({
         ...prev,
         totalQuestions: prev.totalQuestions + 1,
       }));
+      requestLog.push(Date.now());  // Add request timestamp
     } catch (error) {
       console.error("Error fetching question:", error);
       onError("Failed to generate question. Please try again.");
@@ -100,6 +144,11 @@ export const PlaygroundView: React.FC<PlaygroundViewProps> = ({
   };
 
   const handleSearch = async (newQuery: string) => {
+    const rateLimitError = checkRateLimits();
+    if (rateLimitError) {
+      onError(rateLimitError);
+      return;
+    }
     try {
       setIsInitialLoading(true);
       setQuery(newQuery);
@@ -124,6 +173,7 @@ export const PlaygroundView: React.FC<PlaygroundViewProps> = ({
           isSessionComplete: false,
         });
       }
+      requestLog.push(Date.now());  // Add request timestamp
     } catch (error) {
       console.error("Search error:", error);
       onError("Failed to start practice session");
@@ -204,7 +254,7 @@ export const PlaygroundView: React.FC<PlaygroundViewProps> = ({
                 className="px-3 py-1.5 rounded-lg bg-purple-500/20 hover:bg-purple-500/30 
                   border border-purple-500/30 transition-colors text-xs sm:text-sm text-purple-300"
               >
-                ⚛️ Quantum Physics
+              ⚛️ Quantum Physics
               </button>
               <button
                 onClick={() => handleSearch("Machine Learning")}
