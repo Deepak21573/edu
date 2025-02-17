@@ -1,4 +1,4 @@
-// src/components/Playground/PlaygroundView.tsx
+
 import React, { useState, useEffect } from "react";
 import { SearchBar } from "../shared/SearchBar";
 import { Loading } from "../shared/Loading";
@@ -21,19 +21,11 @@ interface Stats {
   avgTime: number;
 }
 
-interface TopicProgress {
-  totalAttempts: number;
-  successRate: number;
-  averageTime: number;
-  lastLevel: number;
-  masteryScore: number;
-}
-
 export const PlaygroundView: React.FC<PlaygroundViewProps> = ({
   initialQuery,
   onError,
   onSuccess,
-  userContext
+  userContext,
 }) => {
   const { getQuestion } = useApi();
   const [isInitialLoading, setIsInitialLoading] = useState(false);
@@ -42,16 +34,8 @@ export const PlaygroundView: React.FC<PlaygroundViewProps> = ({
   const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null);
   const [showExplanation, setShowExplanation] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
-  const [nextQuestionTimer, setNextQuestionTimer] = useState<ReturnType<
-    typeof setTimeout
-  > | null>(null);
   const [currentQuestionTime, setCurrentQuestionTime] = useState<number>(0);
-  const [timerInterval, setTimerInterval] = useState<ReturnType<
-    typeof setInterval
-  > | null>(null);
-  const [nextQuestionCountdown, setNextQuestionCountdown] = useState<
-    number | null
-  >(null);
+  const [nextQuestionCountdown, setNextQuestionCountdown] = useState<number | null>(null);
 
   const [sessionStats, setSessionStats] = useState({
     totalQuestions: 0,
@@ -67,69 +51,48 @@ export const PlaygroundView: React.FC<PlaygroundViewProps> = ({
     avgTime: 0,
   });
 
-  const [_topicProgress, _setTopicProgress] = useState<TopicProgress>(() => {
-    const saved = localStorage.getItem(`topic-progress-${query}`);
-    return saved
-      ? JSON.parse(saved)
-      : {
-          totalAttempts: 0,
-          successRate: 0,
-          averageTime: 0,
-          lastLevel: 1,
-          masteryScore: 0,
-        };
-  });
-
-  const [nextQuestion, setNextQuestion] = useState<Question | null>(null);
-  const [preloadedQuestion, setPreloadedQuestion] = useState<Question | null>(null);
-
-  // Add state for tracking when to show next question
-  const [shouldShowNext, setShouldShowNext] = useState(false);
-
-  const startQuestionTimer = (): void => {
-    // Clear any existing timer first
-    if (timerInterval) {
-      clearInterval(timerInterval);
+  // Timer logic
+  useEffect(() => {
+    let interval: NodeJS.Timeout | null = null;
+    if (!isPaused && currentQuestion) {
+      interval = setInterval(() => {
+        setCurrentQuestionTime((prev) => prev + 1);
+      }, 1000);
     }
-    
-    const interval = setInterval(() => {
-      setCurrentQuestionTime((prev) => prev + 1);
-    }, 1000);
-    setTimerInterval(interval);
-  };
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [isPaused, currentQuestion]);
 
-  const stopQuestionTimer = (): void => {
-    if (timerInterval) {
-      clearInterval(timerInterval);
-      setTimerInterval(null);
+  // Countdown logic
+  useEffect(() => {
+    let interval: NodeJS.Timeout | null = null;
+    if (nextQuestionCountdown !== null && nextQuestionCountdown > 0) {
+      interval = setInterval(() => {
+        setNextQuestionCountdown((prev) => (prev !== null ? prev - 0.1 : null));
+      }, 100);
+    } else if (nextQuestionCountdown !== null && nextQuestionCountdown <= 0) {
+      setNextQuestionCountdown(null);
+      fetchNewQuestion();
     }
-  };
-
-  const prefetchNextQuestion = async () => {
-    try {
-      const question = await getQuestion(query, 1, userContext);
-      setNextQuestion(question);
-    } catch (error) {
-      console.error("Error prefetching next question:", error);
-    }
-  };
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [nextQuestionCountdown]);
 
   const fetchNewQuestion = async () => {
-    if (!query) return;
-
-    if (sessionStats.totalQuestions >= sessionStats.sessionLimit) {
-      setSessionStats((prev) => ({ ...prev, isSessionComplete: true }));
-      stopQuestionTimer();
-      if (nextQuestionTimer) clearTimeout(nextQuestionTimer);
-      onSuccess("Congratulations! You've completed your practice session! 🎉");
-      return;
-    }
+    if (!query || sessionStats.isSessionComplete) return;
 
     try {
-      console.log('Fetching next question...'); // Debug log
       const question = await getQuestion(query, 1, userContext);
-      console.log('Question loaded:', question); // Debug log
-      setPreloadedQuestion(question);
+      setCurrentQuestion(question);
+      setSelectedAnswer(null);
+      setShowExplanation(false);
+      setCurrentQuestionTime(0);
+      setSessionStats((prev) => ({
+        ...prev,
+        totalQuestions: prev.totalQuestions + 1,
+      }));
     } catch (error) {
       console.error("Error fetching question:", error);
       onError("Failed to generate question. Please try again.");
@@ -139,21 +102,15 @@ export const PlaygroundView: React.FC<PlaygroundViewProps> = ({
   const handleSearch = async (newQuery: string) => {
     try {
       setIsInitialLoading(true);
-      setCurrentQuestion(null);
-      setSelectedAnswer(null);
-      setShowExplanation(false);
       setQuery(newQuery);
 
-      // Load first question immediately
       const firstQuestion = await getQuestion(newQuery, 1, userContext);
       setCurrentQuestion(firstQuestion);
       setSelectedAnswer(null);
-      setCurrentQuestionTime(0); // Reset timer
-      startQuestionTimer(); // Start timer for first question
+      setCurrentQuestionTime(0);
 
       // Reset stats for new topic
-      const isSameTopic = newQuery === query;
-      if (!isSameTopic) {
+      if (newQuery !== query) {
         setStats({
           questions: 0,
           accuracy: 0,
@@ -175,22 +132,28 @@ export const PlaygroundView: React.FC<PlaygroundViewProps> = ({
     }
   };
 
-  const togglePause = () => {
-    setIsPaused(!isPaused);
-    if (nextQuestionTimer) {
-      clearTimeout(nextQuestionTimer);
-      setNextQuestionTimer(null);
+  const handleAnswer = (index: number) => {
+    if (selectedAnswer !== null || !currentQuestion) return;
+
+    setSelectedAnswer(index);
+    setShowExplanation(true);
+    updateStats(index === currentQuestion.correctAnswer);
+
+    if (!isPaused) {
+      startCountdown();
     }
   };
 
-  const COUNTDOWN_DURATION = 5;
+  const togglePause = () => {
+    setIsPaused((prev) => !prev);
+  };
 
   const updateStats = (isCorrect: boolean): void => {
     setStats((prev) => {
       const newQuestions = prev.questions + 1;
       const newAccuracy = (prev.accuracy * prev.questions + (isCorrect ? 100 : 0)) / newQuestions;
       const newStreak = isCorrect ? prev.streak + 1 : 0;
-      
+
       return {
         questions: newQuestions,
         accuracy: newAccuracy,
@@ -202,87 +165,8 @@ export const PlaygroundView: React.FC<PlaygroundViewProps> = ({
   };
 
   const startCountdown = () => {
-    setNextQuestionCountdown(COUNTDOWN_DURATION);
-    const interval = setInterval(() => {
-      setNextQuestionCountdown((prev) => {
-        if (prev === null) return null;
-        const next = prev - 0.1;
-        if (next <= 0) {
-          clearInterval(interval);
-          setShouldShowNext(true); // Trigger question transition
-          return null;
-        }
-        return next;
-      });
-    }, 100);
+    setNextQuestionCountdown(5); // 5-second countdown
   };
-
-  const handleAnswer = (index: number) => {
-    if (selectedAnswer !== null || !currentQuestion) return;
-    
-    setSelectedAnswer(index);
-    setShowExplanation(true);
-    stopQuestionTimer();
-    updateStats(index === currentQuestion.correctAnswer);
-    
-    if (!isPaused) {
-      // Start loading next question immediately
-      fetchNewQuestion();
-      // Start countdown for transition
-      startCountdown();
-    }
-  };
-
-  useEffect(() => {
-    if (query) {
-      fetchNewQuestion();
-    }
-  }, [query]);
-
-  useEffect(() => {
-    if (initialQuery) {
-      handleSearch(initialQuery);
-    }
-  }, [initialQuery]);
-
-  useEffect(() => {
-    if (_topicProgress) {
-      console.log('Topic progress updated:', _topicProgress);
-    }
-  }, [_topicProgress]);
-
-  useEffect(() => {
-    if (nextQuestion) {
-      prefetchNextQuestion();
-    }
-  }, [nextQuestion]);
-
-  // Use useEffect to handle question transitions
-  useEffect(() => {
-    if (shouldShowNext && preloadedQuestion) {
-      console.log('Transitioning to next question:', preloadedQuestion);
-      setCurrentQuestion(preloadedQuestion);
-      setPreloadedQuestion(null);
-      setShouldShowNext(false);
-      setSelectedAnswer(null);
-      setShowExplanation(false);
-      setCurrentQuestionTime(0); // Reset timer
-      startQuestionTimer(); // Start timer for new question
-      setSessionStats(prev => ({
-        ...prev,
-        totalQuestions: prev.totalQuestions + 1
-      }));
-    }
-  }, [shouldShowNext, preloadedQuestion]);
-
-  // Add cleanup for timer
-  useEffect(() => {
-    return () => {
-      if (timerInterval) {
-        clearInterval(timerInterval);
-      }
-    };
-  }, []);
 
   const formatAccuracy = (accuracy: number): number => {
     return Math.round(accuracy);
@@ -303,7 +187,6 @@ export const PlaygroundView: React.FC<PlaygroundViewProps> = ({
           <h1 className="text-2xl sm:text-3xl font-bold text-center mb-4">
             What do you want to practice?
           </h1>
-          
           <div className="w-full max-w-xl mx-auto">
             <SearchBar
               onSearch={handleSearch}
@@ -311,11 +194,9 @@ export const PlaygroundView: React.FC<PlaygroundViewProps> = ({
               centered={true}
               className="bg-gray-900/80"
             />
-            
             <p className="text-sm text-gray-400 text-center mt-1">
               Press Enter to search
             </p>
-            
             <div className="flex flex-wrap items-center justify-center gap-2 mt-2">
               <span className="text-sm text-gray-400">Try:</span>
               <button
@@ -437,7 +318,7 @@ export const PlaygroundView: React.FC<PlaygroundViewProps> = ({
                       <div
                         className="absolute inset-y-0 left-0 bg-primary transition-all duration-100"
                         style={{
-                          width: `${(nextQuestionCountdown / COUNTDOWN_DURATION) * 100}%`,
+                          width: `${(nextQuestionCountdown / 5) * 100}%`,
                         }}
                       />
                     </div>
@@ -493,5 +374,3 @@ export const PlaygroundView: React.FC<PlaygroundViewProps> = ({
     </div>
   );
 };
-
-// abc

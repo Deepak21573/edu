@@ -5,10 +5,11 @@ import OpenAI from 'openai';
   private openai: OpenAI;
   
     constructor() {
-    this.openai = new OpenAI({
-      apiKey: import.meta.env.VITE_OPENAI_API_KEY,
-      dangerouslyAllowBrowser: true
-    });
+      const apiKey = process.env.OPENAI_API_KEY;
+      if (!apiKey) {
+        throw new Error('OpenAI API key is missing. Please set OPENAI_API_KEY in your environment variables.');
+      }
+      this.openai = new OpenAI({ apiKey });
   }
 
   private async makeRequest(systemPrompt: string, userPrompt: string, maxTokens: number = 2000) {
@@ -16,22 +17,16 @@ import OpenAI from 'openai';
       const response = await this.openai.chat.completions.create({
         model: 'gpt-3.5-turbo',
         messages: [
-          { 
-            role: 'system', 
-            content: `${systemPrompt} Provide your response in JSON format.` 
-          },
-          { 
-            role: 'user', 
-            content: userPrompt 
-          }
-            ],
-            temperature: 0.7,
+          { role: 'system', content: `${systemPrompt} Provide your response in JSON format.` },
+          { role: 'user', content: userPrompt },
+        ],
+        temperature: 0.7,
         max_tokens: maxTokens,
-            response_format: { type: "json_object" }
+        response_format: { type: 'json_object' },
       });
-
+  
       return response.choices[0].message?.content || '';
-      } catch (error) {
+    } catch (error) {
       console.error('OpenAI API Error:', error);
       throw new Error('Failed to generate content');
     }
