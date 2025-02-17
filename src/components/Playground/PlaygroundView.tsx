@@ -229,6 +229,53 @@ export const PlaygroundView: React.FC<PlaygroundViewProps> = ({
       </div>
     );
   }
+  interface StatsCardProps {
+    icon: React.ReactNode;
+    label: string;
+    value: string | number;
+    className?: string;
+  }
+  
+  const StatsCard: React.FC<StatsCardProps> = ({ icon, label, value, className }) => {
+    return (
+      <div className={`card ${className}`}>
+        <div className="flex items-center gap-2 text-primary">
+          {icon}
+          <span className="text-sm font-medium">{label}</span>
+        </div>
+        <div className="mt-1 text-xl font-semibold">
+          {value}
+        </div>
+      </div>
+    );
+  };
+  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 mt-2">
+  <StatsCard 
+    icon={<Trophy className="w-5 h-5" />} 
+    label="Score" 
+    value={`${formatAccuracy(stats.accuracy)}%`} 
+  />
+  <StatsCard 
+    icon={<Target className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />} 
+    label="Questions" 
+    value={stats.questions} 
+  />
+  <StatsCard 
+    icon={<Award className="w-5 h-5 text-yellow-500" />} 
+    label="Streak" 
+    value={stats.streak} 
+    className="text-yellow-500"
+  />
+  <StatsCard 
+    icon={<Timer className="w-5 h-5 text-purple-500" />} 
+    label="Time" 
+    value={`${currentQuestionTime}s`} 
+    className="text-purple-500"
+  />
+</div>
+
+
+
 
   return (
     <div className="w-full min-h-[calc(100vh-4rem)] flex flex-col">
